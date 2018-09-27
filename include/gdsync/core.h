@@ -63,7 +63,9 @@ struct gds_cq {
 };
 
 struct gds_qp {
-        struct ibv_qp *qp;
+        struct ibv_srq *srq;
+        struct ibv_qp *send_qp;
+        struct ibv_qp *recv_qp;
         struct gds_cq send_cq;
         struct gds_cq recv_cq;
         struct ibv_exp_res_domain * res_domain;
@@ -76,7 +78,7 @@ struct gds_qp {
  * use SRQ.
  */
 
-struct gds_qp *gds_create_qp(struct ibv_pd *pd, struct ibv_context *context,
+struct gds_qp *gds_create_qp(struct ibv_exp_device_attr *dev_attr, struct ibv_pd *pd, struct ibv_context *context,
                              gds_qp_init_attr_t *qp_init_attr,
                              int gpu_id, int flags);
 
@@ -99,7 +101,7 @@ int gds_post_send(struct gds_qp *qp, gds_send_wr *wr, gds_send_wr **bad_wr);
  * Notes:
  * - there is no GPU-synchronous version of this because there is not a use case for it.
  */
-int gds_post_recv(struct gds_qp *qp, struct ibv_recv_wr *wr, struct ibv_recv_wr **bad_wr);
+int gds_post_recv(struct gds_qp *qp, struct ibv_exp_ops_wr *wr, struct ibv_exp_ops_wr **bad_wr);
 
 int gds_stream_wait_cq(CUstream stream, struct gds_cq *cq, int flags);
 

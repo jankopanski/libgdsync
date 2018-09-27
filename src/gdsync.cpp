@@ -1171,7 +1171,7 @@ out:
 static void gds_dump_ops(struct peer_op_wr *op, size_t count)
 {
         size_t n = 0;
-        for (; op; op = op->next, ++n) {
+        for (; op && n < count; op = op->next, ++n) {
                 gds_dbg("op[%zu] type:%d\n", n, op->type);
                 switch(op->type) {
                 case IBV_EXP_PEER_OP_FENCE: {
@@ -1204,7 +1204,8 @@ static void gds_dump_ops(struct peer_op_wr *op, size_t count)
                         break;
                 }
                 case IBV_EXP_PEER_OP_POLL_AND_DWORD:
-                case IBV_EXP_PEER_OP_POLL_NOR_DWORD: {
+                case IBV_EXP_PEER_OP_POLL_NOR_DWORD:
+                case IBV_EXP_PEER_OP_POLL_GEQ_DWORD: {
                         CUdeviceptr dev_ptr = range_from_id(op->wr.dword_va.target_id)->dptr + 
                                 op->wr.dword_va.offset;
                         gds_dbg("%s data:%08x target_id:%" PRIx64 " offset:%zu dev_ptr=%llx\n", 
@@ -1690,6 +1691,7 @@ static ibv_exp_res_domain *gds_create_res_domain(struct ibv_context *context)
 
         res_domain_attr.comp_mask |= IBV_EXP_RES_DOMAIN_THREAD_MODEL;
         res_domain_attr.thread_model = IBV_EXP_THREAD_SINGLE;
+        // res_domain_attr.thread_model = IBV_EXP_THREAD_SAFE;
 
         ibv_exp_res_domain *res_domain = ibv_exp_create_res_domain(context, &res_domain_attr);
         if (!res_domain) {
@@ -1801,18 +1803,21 @@ gds_create_cq(struct ibv_context *context, int cqe,
 
 //-----------------------------------------------------------------------------
 
-struct gds_qp *gds_create_qp(struct ibv_pd *pd, struct ibv_context *context,
-                                gds_qp_init_attr_t *qp_attr, int gpu_id, int flags)
+struct gds_qp *gds_create_qp(struct ibv_exp_device_attr *dev_attr, struct ibv_pd *pd, struct ibv_context *context,
+                                        gds_qp_init_attr_t *qp_attr, int gpu_id, int flags)
 {
         int ret = 0;
         struct gds_qp *gqp = NULL;
-        struct ibv_qp *qp = NULL;
+        struct ibv_qp *send_qp = NULL, *recv_qp = NULL;
+        struct ibv_srq *srq = NULL;
         struct gds_cq *rx_gcq = NULL, *tx_gcq = NULL;
         gds_peer *peer = NULL;
         gds_peer_attr *peer_attr = NULL;
+        struct ibv_exp_create_srq_attr srq_attr;
         int old_errno = errno;
 
         gds_dbg("pd=%p context=%p gpu_id=%d flags=%08x current errno=%d\n", pd, context, gpu_id, flags, errno);
+        assert(dev_attr);
         assert(pd);
         assert(context);
         assert(qp_attr);
@@ -1862,12 +1867,41 @@ struct gds_qp *gds_create_qp(struct ibv_pd *pd, struct ibv_context *context,
                 goto err;
         }
 
-        // peer registration
-        qp_attr->send_cq = tx_gcq->cq;
-        qp_attr->recv_cq = rx_gcq->cq;
-        qp_attr->pd = pd;
-        qp_attr->comp_mask |= IBV_EXP_QP_INIT_ATTR_PD;
+        // struct ibv_exp_create_srq_attr srq_attr = {
+	// 	.base.attr = {
+	// 	        .max_wr  = 33,
+	// 		.max_sge = 1
+	// 	},
+	// 	.comp_mask =
+	// 		IBV_EXP_CREATE_SRQ_CQ |
+	// 		IBV_EXP_CREATE_SRQ_TM,
+	// 	.srq_type = IBV_EXP_SRQT_TAG_MATCHING,
+	// 	.pd = pd,
+	// 	.cq = rx_gcq->cq,
+	// 	.tm_cap = {
+	// 		.max_num_tags = dev_attr->tm_caps.max_num_tags,
+	// 		.max_ops = dev_attr->tm_caps.max_ops,
+	// 	}
+	// };
+        srq_attr.base.attr.max_wr = 33;
+        srq_attr.base.attr.max_sge = 1;
+        srq_attr.comp_mask = IBV_EXP_CREATE_SRQ_CQ | IBV_EXP_CREATE_SRQ_TM;
+        srq_attr.srq_type = IBV_EXP_SRQT_TAG_MATCHING;
+        srq_attr.pd = pd;
+        srq_attr.cq = rx_gcq->cq;
+        srq_attr.tm_cap.max_num_tags = 10;
+        srq_attr.tm_cap.max_ops = 10;
+        // srq_attr.tm_cap.max_num_tags = dev_attr->tm_caps.max_num_tags;
+        // srq_attr.tm_cap.max_ops = dev_attr->tm_caps.max_ops;
 
+        srq = ibv_exp_create_srq(context, &srq_attr);
+        if (!srq) {
+                ret = errno;
+                gds_err("error %d while creating SRQ\n", ret);
+                goto err;
+        }
+
+        // peer registration
         peer->alloc_type = gds_peer::WQ;
         peer->alloc_flags = GDS_ALLOC_WQ_DEFAULT | GDS_ALLOC_DBREC_DEFAULT;
         if (flags & GDS_CREATE_QP_WQ_ON_GPU) {
@@ -1877,21 +1911,44 @@ struct gds_qp *gds_create_qp(struct ibv_pd *pd, struct ibv_context *context,
         if (flags & GDS_CREATE_QP_WQ_DBREC_ON_GPU) {
                 gds_warn("QP WQ DBREC on GPU\n");
                 peer->alloc_flags |= GDS_ALLOC_DBREC_ON_GPU;
-        }        
+        }
+
+        qp_attr->pd = pd;
+        qp_attr->comp_mask |= IBV_EXP_QP_INIT_ATTR_PD;
         qp_attr->comp_mask |= IBV_EXP_QP_INIT_ATTR_PEER_DIRECT;
         qp_attr->peer_direct_attrs = peer_attr;
+        // TODO this params are set in mp_init
+        // qp_attr->cap.max_send_wr = dev_addr->max_qp_wr;
+        // qp_attr->cap.max_send_sge = 2;
+        qp_attr->send_cq = qp_attr->recv_cq = tx_gcq->cq;
+        gds_info("tx_gcq->cq %p\n", tx_gcq->cq);
 
-        qp = ibv_exp_create_qp(context, qp_attr);
-        if (!qp)  {
-                ret = EINVAL;
+        send_qp = ibv_exp_create_qp(context, qp_attr);
+        if (!send_qp)  {
+                ret = errno;
                 gds_err("error in ibv_exp_create_qp\n");
                 goto err;
         }
 
-        gqp->qp = qp;
-        gqp->send_cq.cq = qp->send_cq;
+        qp_attr->srq = gqp->srq;
+	qp_attr->cap.max_send_wr = 0;
+	qp_attr->cap.max_recv_wr = 0;
+        qp_attr->send_cq = qp_attr->recv_cq = rx_gcq->cq;
+        gds_info("rx_gcq->cq %p\n", rx_gcq->cq);
+
+        recv_qp = ibv_exp_create_qp(context, qp_attr);
+        if (!recv_qp)  {
+                ret = errno;
+                gds_err("error in ibv_exp_create_qp\n");
+                goto err;
+        }
+
+        gqp->send_qp = send_qp;
+        gqp->recv_qp = recv_qp;
+        gqp->srq = srq;
+        gqp->send_cq.cq = tx_gcq->cq;
         gqp->send_cq.curr_offset = 0;
-        gqp->recv_cq.cq = qp->recv_cq;
+        gqp->recv_cq.cq = rx_gcq->cq;
         gqp->recv_cq.curr_offset = 0;
 
         gds_dbg("created gds_qp=%p\n", gqp);
@@ -1914,13 +1971,31 @@ int gds_destroy_qp(struct gds_qp *gqp)
         
         if(!gqp) return retcode;
 
-        if(gqp->qp)
+        if(gqp->send_qp)
         {
-            ret = ibv_destroy_qp(gqp->qp);
+            ret = ibv_destroy_qp(gqp->send_qp);
             if (ret) {
                     gds_err("error %d in destroy_qp\n", ret);
                     retcode = ret;
             }            
+        }
+
+        if(gqp->recv_qp)
+        {
+            ret = ibv_destroy_qp(gqp->recv_qp);
+            if (ret) {
+                    gds_err("error %d in destroy_qp\n", ret);
+                    retcode = ret;
+            }            
+        }
+
+        if (gqp->srq)
+        {
+                ret = ibv_destroy_srq(gqp->srq);
+                if (ret) {
+                        gds_err("error %d in destroy_srq\n", ret);
+                        retcode = ret;
+                }
         }
 
         if(gqp->send_cq.cq)

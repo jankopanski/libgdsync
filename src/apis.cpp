@@ -96,7 +96,7 @@ static int gds_rollback_qp(struct gds_qp *qp, gds_send_request_t * send_info, en
         int ret=0;
 
         assert(qp);
-        assert(qp->qp);
+        assert(qp->send_qp);
         assert(send_info);
         if(
                         flag != IBV_EXP_ROLLBACK_ABORT_UNCOMMITED && 
@@ -115,7 +115,7 @@ static int gds_rollback_qp(struct gds_qp *qp, gds_send_request_t * send_info, en
         /* Reserved for future expensions, must be 0 */
         rollback.comp_mask = 0;
         gds_warn("Need to rollback WQE %lx\n", rollback.rollback_id);
-        ret = ibv_exp_rollback_qp(qp->qp, &rollback);
+        ret = ibv_exp_rollback_qp(qp->send_qp, &rollback);
         if(ret)
                 gds_err("error %d in ibv_exp_rollback_qp\n", ret);
 
@@ -152,14 +152,15 @@ out:
 
 //-----------------------------------------------------------------------------
 
-int gds_post_recv(struct gds_qp *qp, struct ibv_recv_wr *wr, struct ibv_recv_wr **bad_wr)
+int gds_post_recv(struct gds_qp *qp, struct ibv_exp_ops_wr *wr, struct ibv_exp_ops_wr **bad_wr)
 {
         int ret = 0;
 
         gds_dbg("qp=%p wr=%p\n", qp, wr);
         assert(qp);
-        assert(qp->qp);
-        ret = ibv_post_recv(qp->qp, wr, bad_wr);
+        assert(qp->srq);
+        // ret = ibv_post_recv(qp->qp, wr, bad_wr);
+        ret = ibv_exp_post_srq_ops(qp->srq, wr, bad_wr);
         if (ret) {
                 gds_err("error %d in ibv_post_recv\n", ret);
                 goto out;
@@ -178,8 +179,8 @@ int gds_prepare_send(struct gds_qp *qp, gds_send_wr *p_ewr,
         int ret = 0;
         gds_init_send_info(request);
         assert(qp);
-        assert(qp->qp);
-        ret = ibv_exp_post_send(qp->qp, p_ewr, bad_ewr);
+        assert(qp->send_qp);
+        ret = ibv_exp_post_send(qp->send_qp, p_ewr, bad_ewr);
         if (ret) {
 
                 if (ret == ENOMEM) {
@@ -191,7 +192,7 @@ int gds_prepare_send(struct gds_qp *qp, gds_send_wr *p_ewr,
                 goto out;
         }
         
-        ret = ibv_exp_peer_commit_qp(qp->qp, &request->commit);
+        ret = ibv_exp_peer_commit_qp(qp->send_qp, &request->commit);
         if (ret) {
                 gds_err("error %d in ibv_exp_peer_commit_qp\n", ret);
                 //gds_wait_kernel();
@@ -298,7 +299,7 @@ int gds_prepare_wait_cq(struct gds_cq *cq, gds_wait_request_t *request, int flag
                 gds_err("error %d in peer_peek_cq\n", retcode);
                 goto out;
         }
-        //gds_dump_wait_request(request, 1);
+        gds_dump_wait_request(request, 1);
         out:
 	       return retcode;
 }

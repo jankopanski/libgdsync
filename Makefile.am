@@ -15,7 +15,8 @@ lib_LTLIBRARIES = src/libgdsync.la
 ACLOCAL_AMFLAGS = -Iconfig
 AM_CFLAGS = -g -Wall
 AM_CFLAGS += $(PTHREAD_CFLAGS)
-AM_CXXFLAGS = $(PTHREAD_CFLAGS)
+AM_CXXFLAGS = -g -Wall
+AM_CXXFLAGS += $(PTHREAD_CFLAGS)
 EXTRA_DIST = autogen.sh
 
 include_HEADERS = include/gdsync.h
@@ -30,37 +31,37 @@ noinst_HEADERS = src/mem.hpp src/memmgr.hpp src/objs.hpp src/rangeset.hpp src/ut
 
 # if enabled at configure time
 
-if TEST_ENABLE
+# if TEST_ENABLE
 
-bin_PROGRAMS = tests/gds_kernel_latency tests/gds_poll_lat tests/gds_kernel_loopback_latency tests/gds_sanity
-noinst_PROGRAMS = tests/rstest tests/wqtest
+# bin_PROGRAMS = tests/gds_kernel_latency tests/gds_poll_lat tests/gds_kernel_loopback_latency tests/gds_sanity
+# noinst_PROGRAMS = tests/rstest tests/wqtest
 
-tests_gds_kernel_latency_SOURCES = tests/gds_kernel_latency.c tests/gpu_kernels.cu tests/pingpong.c tests/gpu.cpp
-tests_gds_kernel_latency_LDADD = $(top_builddir)/src/libgdsync.la -lmpi $(LIBGDSTOOLS) -lgdrapi $(LIBNVTX) -lcuda -lcudart $(PTHREAD_LIBS)
+# tests_gds_kernel_latency_SOURCES = tests/gds_kernel_latency.c tests/gpu_kernels.cu tests/pingpong.c tests/gpu.cpp
+# tests_gds_kernel_latency_LDADD = $(top_builddir)/src/libgdsync.la -lmpi $(LIBGDSTOOLS) -lgdrapi $(LIBNVTX) -lcuda -lcudart $(PTHREAD_LIBS)
 
-tests_rstest_SOURCES = tests/rstest.cpp
-tests_rstest_LDADD = 
+# tests_rstest_SOURCES = tests/rstest.cpp
+# tests_rstest_LDADD = 
 
-tests_wqtest_SOURCES = tests/task_queue_test.cpp
-tests_wqtest_LDADD = $(PTHREAD_LIBS)
+# tests_wqtest_SOURCES = tests/task_queue_test.cpp
+# tests_wqtest_LDADD = $(PTHREAD_LIBS)
 
-tests_gds_poll_lat_SOURCES = tests/gds_poll_lat.c tests/gpu.cpp tests/gpu_kernels.cu
-tests_gds_poll_lat_LDADD = $(top_builddir)/src/libgdsync.la $(LIBGDSTOOLS) -lgdrapi -lmpi $(LIBNVTX) -lcuda -lcudart $(PTHREAD_LIBS)
+# tests_gds_poll_lat_SOURCES = tests/gds_poll_lat.c tests/gpu.cpp tests/gpu_kernels.cu
+# tests_gds_poll_lat_LDADD = $(top_builddir)/src/libgdsync.la $(LIBGDSTOOLS) -lgdrapi -lmpi $(LIBNVTX) -lcuda -lcudart $(PTHREAD_LIBS)
 
-tests_gds_sanity_SOURCES = tests/gds_sanity.cpp tests/gpu.cpp tests/gpu_kernels.cu
-tests_gds_sanity_LDADD = $(top_builddir)/src/libgdsync.la $(LIBGDSTOOLS) -lgdrapi -lmpi $(LIBNVTX) -lcuda -lcudart $(PTHREAD_LIBS)
+# tests_gds_sanity_SOURCES = tests/gds_sanity.cpp tests/gpu.cpp tests/gpu_kernels.cu
+# tests_gds_sanity_LDADD = $(top_builddir)/src/libgdsync.la $(LIBGDSTOOLS) -lgdrapi -lmpi $(LIBNVTX) -lcuda -lcudart $(PTHREAD_LIBS)
 
-tests_gds_kernel_loopback_latency_SOURCES = tests/gds_kernel_loopback_latency.c tests/pingpong.c tests/gpu.cpp tests/gpu_kernels.cu
-tests_gds_kernel_loopback_latency_LDADD = $(top_builddir)/src/libgdsync.la $(LIBGDSTOOLS) -lgdrapi $(LIBNVTX) -lcuda -lcudart $(PTHREAD_LIBS)
-
-
-SUFFIXES= .cu
-
-.cu.o:
-	$(NVCC) $(CPPFLAGS) $(AM_CPPFLAGS) $(NVCCFLAGS)  -c -o $@ $<
+# tests_gds_kernel_loopback_latency_SOURCES = tests/gds_kernel_loopback_latency.c tests/pingpong.c tests/gpu.cpp tests/gpu_kernels.cu
+# tests_gds_kernel_loopback_latency_LDADD = $(top_builddir)/src/libgdsync.la $(LIBGDSTOOLS) -lgdrapi $(LIBNVTX) -lcuda -lcudart $(PTHREAD_LIBS)
 
 
-.cu.lo:
-	$(LIBTOOL) --tag=CC --mode=compile $(NVCC) -o $@ -c $< $(CPPFLAGS) $(AM_CPPFLAGS) $(NVCCFLAGS)
+# SUFFIXES= .cu
 
-endif
+# .cu.o:
+# 	$(NVCC) $(CPPFLAGS) $(AM_CPPFLAGS) $(NVCCFLAGS)  -c -o $@ $<
+
+
+# .cu.lo:
+# 	$(LIBTOOL) --tag=CC --mode=compile $(NVCC) -o $@ -c $< $(CPPFLAGS) $(AM_CPPFLAGS) $(NVCCFLAGS)
+
+# endif
